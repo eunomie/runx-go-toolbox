@@ -1,0 +1,153 @@
+actions:
+  - id: go:build
+    desc: Build the binary for the local platform
+    type: build
+    dockerfile: gobuild.Dockerfile
+    opts:
+      - name: bin_name
+        desc: The name of the binary that also defines the build target as cmd/<bin_name>
+        prompt: Please enter then name of the binary
+        type: input
+        required: true
+    cmd: |
+      -f {{.Dockerfile}} \
+      --build-arg BIN_NAME={{opt "bin_name"}} \
+      --build-arg NO_ARCHIVE=true \
+      --platform local \
+      --target export-bin \
+      --output type=local,dest=dist/ \
+      .
+
+  - id: go:build:all
+    desc: Build for multiple platforms
+    type: build
+    dockerfile: gobuild.Dockerfile
+    opts:
+      - name: bin_name
+        desc: The name of the binary that also defines the build target as cmd/<bin_name>
+        prompt: Please enter then name of the binary
+        type: input
+        required: true
+      - name: platforms
+        desc: "Comma separated list of platforms to build for (ex: linux/amd64,linux/arm64)"
+        prompt: "Please enter the comma separated list of platforms (ex: linux/amd64,linux/arm64)"
+        type: input
+    cmd: |
+      -f {{.Dockerfile}} \
+      --build-arg BIN_NAME={{opt "bin_name"}} \
+      {{if opt "platforms"}}--platform {{opt "platforms"}}{{end}} \
+      --target export-bin \
+      --output type=local,dest=dist/,platform-split=false \
+      .
+
+  - id: go:lint
+    desc: Run golangci-lint
+    type: run
+    shell:
+      pwd: pwd
+      gopath: go env GOPATH
+      gocache: go env GOCACHE
+    cmd: |
+      --rm \
+      {{if .IsTTY}}-t{{end}} \
+      -v {{sh "pwd"}}:/app \
+      -v {{sh "gopath"}}/pkg:/go/pkg \
+      -v {{sh "gocache"}}:/cache/go \
+      -e GOFLAGS=-buildvcs=false \
+      -e GOCACHE=/cache/go \
+      -e GOLANGCI_LINT_CACHE=/cache/go \
+      -w /app \
+      golangci/golangci-lint:v1.61-alpine \
+      golangci-lint run --timeout 5m
+
+  - id: go:mocks
+    desc: Generate mocks using vektra/mockery
+    type: run
+    shell:
+      pwd: pwd
+      gopath: go env GOPATH
+      gocache: go env GOCACHE
+    cmd: |
+      --rm \
+      -v {{sh "pwd"}}:/app \
+      -v {{sh "gopath"}}/pkg:/go/pkg \
+      -v {{sh "gocache"}}:/cache/go \
+      -e GOCACHE=/cache/go \
+      -v {{sh "pwd"}}:/src \
+      -w /src \
+      vektra/mockery:v2.46 \
+      --keeptree -r --all
+
+  - id: go:fmt
+    desc: Organize imports and format code using gofumpt
+    type: run
+    shell:
+      pwd: pwd
+      gopath: go env GOPATH
+      gocache: go env GOCACHE
+    cmd: |
+      --rm \
+      -v {{sh "pwd"}}:/app \
+      -v {{sh "gopath"}}/pkg:/go/pkg \
+      -v {{sh "gocache"}}:/cache/go \
+      -e GOCACHE=/cache/go \
+      -v {{sh "pwd"}}:/src \
+      -w /src \
+      {{.Ref}} sh /tools/fmt.sh
+
+  - id: go:test
+    desc: Run tests
+    type: run
+    shell:
+      pwd: pwd
+      gopath: go env GOPATH
+      gocache: go env GOCACHE
+    opts:
+      - name: race
+        desc: Check for race conditions
+        no-prompt: true
+    cmd: |
+      {{$race := opt "race"}} \
+      --rm \
+      -v {{sh "pwd"}}:/app \
+      -v {{sh "gopath"}}/pkg:/go/pkg \
+      -v {{sh "gocache"}}:/cache/go \
+      -e GOCACHE=/cache/go \
+      {{if eq $race "true"}}-e CGO_ENABLED=1{{end}} \
+      -v {{sh "pwd"}}:/src \
+      -w /src \
+      {{.Ref}} \
+      go test {{if eq $race "true"}}-race{{end}} -shuffle=on ./...
+
+  - id: docker:build
+    desc: Build a Docker image
+    type: build
+    opts:
+      - name: platform
+        desc: The platform to build for
+        no-prompt: true
+      - name: push
+        type: confirm
+        desc: Push the image after building
+        no-prompt: true
+      - name: target
+        desc: The target to build
+        no-prompt: true
+      - name: image
+        desc: The name of the image
+        prompt: Please enter the reference of the image to build
+        type: input
+        required: true
+    cmd: |
+      {{$platform := opt "platform"}} \
+      {{$push := optBool "push"}} \
+      --attest type=sbom \
+      --attest type=provenance,mode=max \
+      --ssh default \
+      -f Dockerfile \
+      -t {{opt "image"}} \
+      {{if opt "target"}}--target {{opt "target"}}{{end}} \
+      {{if $platform}}--platform {{$platform}}{{end}} \
+      {{if $push}}--push{{end}} \
+      {{if not $push}}--output type=local,dest=dist/{{end}} \
+      .

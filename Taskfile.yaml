@@ -1,0 +1,18 @@
+version: '3'
+
+vars:
+  IMAGE: eunomie/runx-go:latest
+  PLATFORMS: linux/amd64,linux/arm64
+
+tasks:
+  build:
+    - |
+      docker buildx build \
+      --platform {{.PLATFORMS}} \
+      --attest type=sbom \
+      --attest type=provenance,mode=max \
+      --tag {{.IMAGE}} \
+      --push \
+      .
+    - |
+      (cd runx; docker runx decorate {{.IMAGE}} -t {{.IMAGE}})
